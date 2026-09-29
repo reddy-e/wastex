@@ -1,0 +1,273 @@
+// Smart Waste Exchange Database Schema (Prisma)
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  WASTE_PRODUCER
+  RECYCLER_INDUSTRY
+  FARMER_ORGANIC_USER
+  ADMIN
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum CategoryType {
+  E_WASTE
+  ORGANIC_WASTE
+}
+
+enum ListingStatus {
+  AVAILABLE
+  BIDDING
+  CLAIMED
+  IN_PICKUP
+  COMPLETED
+  CANCELLED
+}
+
+enum PickupStatus {
+  REQUESTED
+  CONFIRMED
+  SCHEDULED
+  PICKED_UP
+  COMPLETED
+  CANCELLED
+}
+
+model User {
+  id                    String              @id @default(uuid())
+  email                 String              @unique
+  passwordHash          String
+  name                  String
+  role                  Role                @default(WASTE_PRODUCER)
+  organization          String?
+  phone                 String?
+  address               String?
+  city                  String?
+  area                  String?
+  verificationStatus    VerificationStatus  @default(UNVERIFIED)
+  verificationBadge     String?             // e.g. "Verified Recycler", "Verified Farmer"
+  rating                Float               @default(5.0)
+  completedExchangesCount Int               @default(0)
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  profile               Profile?
+  listings              WasteListing[]      @relation("UserListings")
+  bids                  Bid[]
+  claims                Claim[]
+  pickupsAsProducer     Pickup[]            @relation("PickupProducer")
+  pickupsAsCollector    Pickup[]            @relation("PickupCollector")
+  sentMessages          Message[]           @relation("SentMessages")
+  receivedMessages      Message[]           @relation("ReceivedMessages")
+  notifications         Notification[]
+  givenReviews          Review[]            @relation("GivenReviews")
+  receivedReviews       Review[]            @relation("ReceivedReviews")
+  verificationRequests  VerificationRequest[]
+  reportsSubmitted      Report[]            @relation("ReportsSubmitted")
+  savedListings         SavedListing[]
+}
+
+model Profile {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bio                 String?
+  avatarUrl           String?
+  businessLicenseNo   String?
+  gstNo               String?
+  contactPreferences   String?
+  latitude            Float?
+  longitude           Float?
+}
+
+model WasteCategory {
+  id          String        @id @default(uuid())
+  name        String        @unique
+  type        CategoryType
+  description String?
+  icon        String?
+  listings    WasteListing[]
+}
+
+model WasteListing {
+  id                    String        @id @default(uuid())
+  producerId            String
+  producer              User          @relation("UserListings", fields: [producerId], references: [id], onDelete: Cascade)
+  categoryId            String
+  category              WasteCategory @relation(fields: [categoryId], references: [id])
+  type                  CategoryType
+  title                 String
+  description           String
+  quantity              Float
+  unit                  String        // e.g., "kg", "tons", "units"
+  condition             String        // e.g., "Good", "Scrap", "Refurbishable", "Fresh Organic"
+  source                String        // e.g., "IT Office", "Restaurant", "Market Vendor"
+  availabilityDate      DateTime
+  expiryDate            DateTime?
+  address               String
+  city                  String
+  area                  String
+  latitude              Float?
+  longitude             Float?
+  images                String[]      // JSON array or string array
+  preferredCollection   String        // "Self Drop-off", "Pickup Required", "Both"
+  expectedPrice         Float?        // Null if free/claimable
+  isFree                Boolean       @default(false)
+  
+  // Organic waste specific safety & classification
+  contaminationStatus   String?       // "None", "Minor Organic Mix", "Non-Hazardous"
+  suitableUse           String?       // "Composting", "Biogas", "Agricultural Soil Conditioning", "Industrial Recovery"
+  safetyDisclaimerAccepted Boolean    @default(true)
+
+  status                ListingStatus @default(AVAILABLE)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  bids                  Bid[]
+  claims                Claim[]
+  pickups               Pickup[]
+  transactions          Transaction[]
+  savedBy               SavedListing[]
+  reports               Report[]
+}
+
+model Bid {
+  id              String       @id @default(uuid())
+  listingId       String
+  listing         WasteListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  bidderId        String
+  bidder          User         @relation(fields: [bidderId], references: [id], onDelete: Cascade)
+  amount          Float
+  notes           String?
+  status          String       @default("PENDING") // "PENDING", "ACCEPTED", "REJECTED"
+  createdAt       DateTime     @default(now())
+}
+
+model Claim {
+  id              String       @id @default(uuid())
+  listingId       String
+  listing         WasteListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  claimerId       String
+  claimer         User         @relation(fields: [claimerId], references: [id], onDelete: Cascade)
+  intendedUse     String
+  notes           String?
+  status          String       @default("PENDING") // "PENDING", "APPROVED", "REJECTED"
+  createdAt       DateTime     @default(now())
+}
+
+model Pickup {
+  id              String       @id @default(uuid())
+  listingId       String
+  listing         WasteListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  producerId      String
+  producer        User         @relation("PickupProducer", fields: [producerId], references: [id])
+  collectorId     String
+  collector       User         @relation("PickupCollector", fields: [collectorId], references: [id])
+  scheduledDate   DateTime
+  timeSlot        String       // e.g. "10:00 AM - 12:00 PM"
+  pickupAddress   String
+  contactPerson   String
+  contactPhone    String
+  notes           String?
+  status          PickupStatus @default(REQUESTED)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  transaction     Transaction?
+}
+
+model Transaction {
+  id              String       @id @default(uuid())
+  listingId       String
+  listing         WasteListing @relation(fields: [listingId], references: [id])
+  pickupId        String?      @unique
+  pickup          Pickup?      @relation(fields: [pickupId], references: [id])
+  buyerId         String
+  sellerId        String
+  amount          Float
+  status          String       @default("COMPLETED")
+  paymentMethod   String       @default("DIRECT_EXCHANGE")
+  createdAt       DateTime     @default(now())
+}
+
+model Notification {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  message         String
+  type            String   // "MATCH", "BID", "CLAIM", "PICKUP", "SYSTEM"
+  read            Boolean  @default(false)
+  link            String?
+  createdAt       DateTime @default(now())
+}
+
+model Message {
+  id              String   @id @default(uuid())
+  senderId        String
+  sender          User     @relation("SentMessages", fields: [senderId], references: [id])
+  receiverId      String
+  receiver        User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  listingId       String?
+  content         String
+  read            Boolean  @default(false)
+  createdAt       DateTime @default(now())
+}
+
+model Review {
+  id              String   @id @default(uuid())
+  reviewerId      String
+  reviewer        User     @relation("GivenReviews", fields: [reviewerId], references: [id])
+  targetUserId    String
+  targetUser      User     @relation("ReceivedReviews", fields: [targetUserId], references: [id])
+  rating          Int      // 1 to 5
+  comment         String
+  createdAt       DateTime @default(now())
+}
+
+model VerificationRequest {
+  id              String             @id @default(uuid())
+  userId          String
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documentType    String
+  documentUrl     String
+  status          VerificationStatus @default(PENDING)
+  adminNotes      String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model Report {
+  id              String       @id @default(uuid())
+  reporterId      String
+  reporter        User         @relation("ReportsSubmitted", fields: [reporterId], references: [id])
+  listingId       String?
+  listing         WasteListing?@relation(fields: [listingId], references: [id])
+  reason          String
+  details         String?
+  status          String       @default("OPEN") // "OPEN", "RESOLVED", "DISMISSED"
+  createdAt       DateTime     @default(now())
+}
+
+model SavedListing {
+  id              String       @id @default(uuid())
+  userId          String
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listingId       String
+  listing         WasteListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  createdAt       DateTime     @default(now())
+
+  @@unique([userId, listingId])
+}
